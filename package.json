@@ -1,0 +1,16 @@
+{
+  "name": "opencode-bedrock-sso-auth",
+  "version": "0.2.0",
+  "description": "Amazon Bedrock in magpie (and OpenCode), signed with SigV4 from your AWS SSO / IAM Identity Center profile instead of a Bedrock API key",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": "./index.mjs",
+  "files": ["index.mjs", "lib/", "README.md", "LICENSE"],
+  "repository": { "type": "git", "url": "git+https://github.com/HaroldLeo/magpie-bedrock-sso.git" },
+  "bugs": { "url": "https://github.com/HaroldLeo/magpie-bedrock-sso/issues" },
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test test/*.test.mjs", "test:live": "node test/live.mjs", "test:gateway": "node test/gateway-live.mjs" },
+  "keywords": ["opencode", "opencode-plugin", "magpie", "bedrock", "aws", "sso", "sigv4"],
+  "license": "MIT",
+  "magpie": { "maxConcurrency": 8 }
+}
