@@ -1,8 +1,10 @@
 # AWS Bedrock SSO
 
-Package name: `opencode-aws-bedrock-sso-auth`. The provider ID remains `bedrock-sso`, so existing model selections do not change.
+Package name: `magpie-aws-bedrock-sso`. The provider ID remains `bedrock-sso`, so existing model selections do not change.
 
-Amazon Bedrock in Magpie (and OpenCode), signed with AWS Signature Version 4 from an AWS CLI profile. No Bedrock bearer API key.
+Amazon Bedrock in Magpie, signed with AWS Signature Version 4 from an AWS CLI profile. No Bedrock bearer API key.
+
+Magpie is the tested host. Direct OpenCode use is unverified. The `opencode` search keyword follows Magpie's discovery convention and does not claim OpenCode support.
 
 This is a candidate release. The repository stays private while distribution permission is unresolved. There is no published npm package.
 
@@ -16,7 +18,7 @@ Amazon Bedrock, through an AWS CLI profile (SSO / IAM Identity Center, or any pr
 
 ## Where the sign-in is kept
 
-Magpie stores the profile name, region, and account label in `~/.config/magpie/plugin-auth.json` (OpenCode: `auth.json`). Not AWS keys. Role credentials stay in the plugin process, from `aws configure export-credentials`, and are refreshed there before they expire.
+Magpie stores the profile name, region, and account label in `~/.config/magpie/plugin-auth.json`. It does not store AWS keys. Role credentials stay in the plugin process, from `aws configure export-credentials`, and are refreshed there before they expire.
 
 Set `MAGPIE_BEDROCK_AWS_CLI` if `aws` is not on Magpie's PATH. On macOS the plugin also checks Homebrew's usual locations.
 
@@ -28,7 +30,7 @@ Limits and prices come from Magpie's local `amazon-bedrock` catalog when present
 
 ## Requirements
 
-- Magpie with OpenCode provider plugin support
+- Magpie with provider plugin support
 - AWS CLI v2 and a profile that can call Bedrock
 - Node.js 20+ for offline tests (Magpie runs the plugin on Bun)
 

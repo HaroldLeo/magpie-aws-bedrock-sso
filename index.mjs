@@ -1,4 +1,4 @@
-// Amazon Bedrock for magpie (and OpenCode), signed with AWS SigV4 from an AWS
+// Amazon Bedrock for Magpie, signed with AWS SigV4 from an AWS
 // SSO / IAM Identity Center profile. Unlike magpie's built-in Bedrock preset,
 // it needs no Bedrock API key, so it works for roles that lack
 // bedrock:CallWithBearerToken.
