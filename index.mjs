@@ -11,7 +11,7 @@ import { callerArn, credentialsFor, forget, listProfiles, profileRegion, SignInE
 import { anthropicBase, cachedMetadata, listModels, seedModels, isSupportedGpt } from "./lib/models.mjs"
 import { signRequest } from "./lib/sigv4.mjs"
 
-export const ID = "bedrock-sso"
+const ID = "bedrock-sso"
 const DEFAULT_REGION = "us-west-2"
 const REGION = /^[a-z]{2}(-gov)?-[a-z]+-\d$/
 const PROFILE = /^[A-Za-z0-9_.@+=-]{1,128}$/
@@ -119,7 +119,7 @@ async function signedFetch(request, body, settings, retried = false) {
   return res
 }
 
-export const BedrockSsoPlugin = async () => {
+async function server() {
   // The sign-in offers profile sections from both AWS files.
   const profiles = await listProfiles()
   const envProfile = process.env.AWS_PROFILE
@@ -144,9 +144,16 @@ export const BedrockSsoPlugin = async () => {
       // What this account's role can see in its region.
       async models(provider, { auth } = {}) {
         if (!auth) return provider?.models ?? {}
-        const settings = settingsOf(auth)
-        const creds = await credentialsFor(settings.profile) // a SignInExpired carries signIn: "expired"
-        return listModels(creds, settings.region)
+        try {
+          const settings = settingsOf(auth)
+          const creds = await credentialsFor(settings.profile)
+          return listModels(creds, settings.region)
+        } catch (error) {
+          // SignInExpired.signIn === "expired": magpie marks the account.
+          // Any other failure returns the list magpie already had.
+          if (error instanceof SignInExpired) throw error
+          return provider?.models ?? {}
+        }
       },
     },
 
@@ -165,7 +172,6 @@ export const BedrockSsoPlugin = async () => {
             const region = inputs.region || (await profileRegion(profile)) || DEFAULT_REGION
             const settings = settingsOf({ profile, region })
             return {
-              url: "",
               method: "auto",
               instructions: `Uses the AWS CLI's SSO sign-in for profile "${settings.profile}" (${settings.region}). If its session has run out, the AWS sign-in page opens in your browser; approve it there.`,
               async callback() {
@@ -184,7 +190,7 @@ export const BedrockSsoPlugin = async () => {
                     type: "success",
                     access: "",
                     refresh: "",
-                    expires: 0,
+                    expires: 0, // no token for auth.refresh; AWS creds stay in-process
                     accountId: account ? `${who} (${account})` : who,
                     profile: settings.profile,
                     region: settings.region,
@@ -230,4 +236,5 @@ export const BedrockSsoPlugin = async () => {
   }
 }
 
-export default BedrockSsoPlugin
+export const _internal = { ID, server }
+export default { id: ID, server }
