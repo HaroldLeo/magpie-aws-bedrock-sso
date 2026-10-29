@@ -8,7 +8,7 @@
 //              https://bedrock-runtime.<region>.amazonaws.com/model/<id>/converse[-stream]
 import { fromConverse, openaiError, streamChat, toConverse } from "./lib/converse.mjs"
 import { callerArn, credentialsFor, forget, listProfiles, profileRegion, SignInExpired, ssoLogin } from "./lib/credentials.mjs"
-import { anthropicBase, cachedMetadata, listModels, seedModels } from "./lib/models.mjs"
+import { anthropicBase, cachedMetadata, listModels, seedModels, isSupportedGpt } from "./lib/models.mjs"
 import { signRequest } from "./lib/sigv4.mjs"
 
 export const ID = "bedrock-sso"
@@ -16,7 +16,7 @@ const DEFAULT_REGION = "us-west-2"
 const REGION = /^[a-z]{2}(-gov)?-[a-z]+-\d$/
 const PROFILE = /^[A-Za-z0-9_.@+=-]{1,128}$/
 
-// The only routes a signature is ever made for.
+// These are the incoming SDK routes served by the plugin.
 const ROUTES = [/^\/anthropic\/v1\/messages(\/count_tokens)?$/, /^\/openai\/v1\/chat\/completions$/]
 
 function settingsOf(auth) {
@@ -54,7 +54,7 @@ async function gptChat(request, body, settings) {
     return new Response(openaiError(400, "stream must be a boolean"), { status: 400, headers: { "content-type": "application/json" } })
   }
   const model = chat.model
-  if (typeof model !== "string" || !/^(?:us|us-gov|global|eu|apac|jp|au)\.openai\.gpt-[A-Za-z0-9.:-]+$/.test(model)) {
+  if (!isSupportedGpt(model)) {
     return new Response(openaiError(400, "Unsupported model ID"), { status: 400, headers: { "content-type": "application/json" } })
   }
   const url = new URL(`https://bedrock-runtime.${settings.region}.amazonaws.com/model/${encodeURIComponent(model)}/${chat.stream ? "converse-stream" : "converse"}`)

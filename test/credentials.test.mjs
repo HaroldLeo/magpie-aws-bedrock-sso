@@ -42,6 +42,8 @@ test("expired SSO is actionable but unrelated AWS failures do not mark it expire
     await assert.rejects(credentialsFor("test-profile"), (e) => e instanceof SignInExpired && e.message.includes("aws sso login"))
     await writeFile(exe, "#!/bin/sh\necho 'SSO configuration missing' >&2\nexit 1\n")
     await assert.rejects(credentialsFor("test-profile"), (e) => !(e instanceof SignInExpired) && /export-credentials failed/.test(e.message))
+    await writeFile(exe, "#!/bin/sh\necho 'The security token included in the request is invalid' >&2\nexit 1\n")
+    await assert.rejects(credentialsFor("test-profile"), (e) => !(e instanceof SignInExpired) && /export-credentials failed/.test(e.message))
   } finally {
     forget("test-profile")
     if (prior === undefined) delete process.env.MAGPIE_BEDROCK_AWS_CLI

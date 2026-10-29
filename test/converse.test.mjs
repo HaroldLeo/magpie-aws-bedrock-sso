@@ -46,9 +46,9 @@ test("a Converse answer becomes a chat completion", () => {
 })
 
 // An event stream frame with string headers, as Bedrock sends them.
-function frame(eventType, payload) {
+function frame(eventType, payload, kind = "event") {
   const enc = new TextEncoder()
-  const hs = [[":event-type", eventType], [":message-type", "event"]].map(([k, v]) => {
+  const hs = [[kind === "exception" ? ":exception-type" : ":event-type", eventType], [":message-type", kind]].map(([k, v]) => {
     const kb = enc.encode(k), vb = enc.encode(v)
     const b = new Uint8Array(1 + kb.length + 1 + 2 + vb.length)
     b[0] = kb.length; b.set(kb, 1); b[1 + kb.length] = 7
@@ -185,10 +185,25 @@ test("empty streamed tool arguments do not become an empty object", async () => 
   await assert.rejects(new Response(streamChat(body, "m")).text(), /argument/i)
 })
 
+test("a token-limited tool call reports truncation", async () => {
+  const events = [frame("messageStart", { role: "assistant" }), frame("contentBlockStart", { contentBlockIndex: 0, start: { toolUse: { name: "clock", toolUseId: "x" } } }), frame("contentBlockDelta", { contentBlockIndex: 0, delta: { toolUse: { input: '{"tz":' } } }), frame("contentBlockStop", { contentBlockIndex: 0 }), frame("messageStop", { stopReason: "max_tokens" })]
+  const body = new ReadableStream({ start(c) { for (const event of events) c.enqueue(event); c.close() } })
+  await assert.rejects(new Response(streamChat(body, "m")).text(), /truncated.*token limit/i)
+})
+
 test("unfinished text blocks do not complete successfully", async () => {
   const events = [frame("messageStart", { role: "assistant" }), frame("contentBlockDelta", { contentBlockIndex: 0, delta: { text: "partial" } }), frame("messageStop", { stopReason: "end_turn" })]
   const body = new ReadableStream({ start(c) { for (const event of events) c.enqueue(event); c.close() } })
   await assert.rejects(new Response(streamChat(body, "m")).text(), /block|incomplete/i)
+})
+
+test("a modeled Bedrock exception fails and cancels upstream", async () => {
+  let canceled = false
+  const bytes = frame("throttlingException", { message: "Rate limited" }, "exception")
+  const body = new ReadableStream({ start(c) { c.enqueue(bytes) }, cancel() { canceled = true } })
+  await assert.rejects(new Response(streamChat(body, "m")).text(), /Rate limited/)
+  assert.equal(canceled, true)
+  assert.equal(body.locked, false)
 })
 
 test("unknown stop reasons do not masquerade as success", async () => {

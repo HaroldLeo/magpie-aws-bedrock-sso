@@ -6,6 +6,20 @@ import { toConverse, streamChat } from "../lib/converse.mjs"
 const tools = [{ type: "function", function: { name: "clock", parameters: { type: "object", properties: {} } } }]
 const chat = (fields = {}) => ({ model: "us.openai.gpt-6.1-terra", messages: [{ role: "user", content: "Hello" }], ...fields })
 
+test("unsupported search and image detail are rejected", () => {
+  assert.throws(() => toConverse(chat({ web_search_options: { search_context_size: "high" } })), /web_search_options/i)
+  assert.throws(() => toConverse(chat({ prediction: { type: "content", content: "answer" } })), /prediction/i)
+  assert.throws(() => toConverse(chat({ messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA", detail: "high" } }] }] })), /image_url.detail/i)
+})
+
+test("tool descriptions are preserved without inventing text", () => {
+  const req = toConverse(chat({ tools }))
+  assert.equal(Object.hasOwn(req.toolConfig.tools[0].toolSpec, "description"), false)
+  const description = "Return the current time"
+  const withDescription = toConverse(chat({ tools: [{ type: "function", function: { ...tools[0].function, description } }] }))
+  assert.equal(withDescription.toolConfig.tools[0].toolSpec.description, description)
+})
+
 test("tool_choice none cannot become auto", () => {
   const result = toConverse(chat({ tools, tool_choice: "none" }))
   assert.equal(result.toolConfig, undefined)
