@@ -1,7 +1,2 @@
 node_modules/
 *.tgz
-.pi/
-.audit/
-decisions.tsv
-WORKPLAN.md
-verification/

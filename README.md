@@ -14,11 +14,11 @@ Amazon Bedrock, through an AWS CLI profile (SSO / IAM Identity Center, or any pr
 
 ## How
 
-`magpie plugin login bedrock-sso` asks for the AWS profile and Bedrock region, then uses `aws sso login` only if that profile's session has run out. The AWS CLI opens its own browser when needed. Every request is SigV4-signed over HTTPS to `bedrock-runtime.<region>.amazonaws.com`. Untrusted hosts, ports, paths, and redirects are refused.
+`magpie plugin login bedrock-sso` asks for the AWS profile and Bedrock region, then uses `aws sso login` only if that profile's session has run out. The AWS CLI opens its own browser when needed. When the session expires later, sign in again in Magpie or run `aws sso login --profile <profile>`. Every request is SigV4-signed over HTTPS to `bedrock-runtime.<region>.amazonaws.com`. Untrusted hosts, ports, paths, and redirects are refused.
 
 ## Where the sign-in is kept
 
-Magpie stores the profile name, region, and account label in `~/.config/magpie/plugin-auth.json`. It does not store AWS keys. Role credentials stay in the plugin process, from `aws configure export-credentials`, and are refreshed there before they expire.
+Magpie stores the profile name, region, and account label in `~/.config/magpie/plugin-auth.json`. It does not store AWS keys. Role credentials stay in the plugin process, from `aws configure export-credentials`, and are refreshed there before they expire. The profile picker honors `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`.
 
 Set `MAGPIE_BEDROCK_AWS_CLI` if `aws` is not on Magpie's PATH. On macOS the plugin also checks Homebrew's usual locations.
 

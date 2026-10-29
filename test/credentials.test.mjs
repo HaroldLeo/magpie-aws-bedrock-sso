@@ -9,9 +9,9 @@ test("the picker reads profile sections without starting the AWS CLI", async () 
   const dir = await mkdtemp(join(tmpdir(), "bedrock-profiles-"))
   const config = join(dir, "config")
   try {
-    await writeFile(config, "[default]\nregion=us-west-2\n[profile work]\nsso_session=login\n[sso-session login]\nsso_region=us-east-1\n[profile work]\n[profile another]\n")
+    await writeFile(config, "[default]\nregion=us-west-2\n[profile example]\nsso_session=login\n[sso-session login]\nsso_region=us-east-1\n[profile example]\n[profile another]\n")
     const missing = join(dir, "missing")
-    assert.deepEqual(await listProfiles({ AWS_CONFIG_FILE: config, AWS_SHARED_CREDENTIALS_FILE: missing }), ["default", "work", "another"])
+    assert.deepEqual(await listProfiles({ AWS_CONFIG_FILE: config, AWS_SHARED_CREDENTIALS_FILE: missing }), ["default", "example", "another"])
     assert.deepEqual(await listProfiles({ AWS_CONFIG_FILE: missing, AWS_SHARED_CREDENTIALS_FILE: missing }), [])
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -23,11 +23,11 @@ test("the picker merges config and credentials profiles without duplicates", asy
   const config = join(dir, "config")
   const credentials = join(dir, "credentials")
   try {
-    await writeFile(config, "[default]\n[profile work]\n[sso-session login]\n")
-    await writeFile(credentials, "[work]\naws_access_key_id=fixture\n[credentials-only]\naws_secret_access_key=fixture\n[default]\n")
+    await writeFile(config, "[default]\n[profile example]\n[sso-session login]\n")
+    await writeFile(credentials, "[example]\naws_access_key_id=fixture\n[credentials-only]\naws_secret_access_key=fixture\n[default]\n")
     const env = { AWS_CONFIG_FILE: config, AWS_SHARED_CREDENTIALS_FILE: credentials }
-    assert.deepEqual(await listProfiles(env), ["default", "work", "credentials-only"])
-    assert.deepEqual(await listProfiles({ ...env, AWS_CONFIG_FILE: join(dir, "missing") }), ["work", "credentials-only", "default"])
+    assert.deepEqual(await listProfiles(env), ["default", "example", "credentials-only"])
+    assert.deepEqual(await listProfiles({ ...env, AWS_CONFIG_FILE: join(dir, "missing") }), ["example", "credentials-only", "default"])
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
