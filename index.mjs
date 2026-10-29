@@ -133,7 +133,7 @@ async function server() {
     config: async (cfg) => {
       cfg.provider ??= {}
       const p = (cfg.provider[ID] ??= {})
-      p.name ??= "Bedrock (AWS SSO)"
+      p.name ??= "AWS Bedrock SSO"
       p.npm ??= "@ai-sdk/anthropic"
       p.api ??= anthropicBase(DEFAULT_REGION)
       p.models = { ...seedModels(DEFAULT_REGION, await cachedMetadata()), ...(p.models ?? {}) }
@@ -216,7 +216,7 @@ async function server() {
             const url = new URL(request.url)
             if (url.protocol !== "https:" || url.port || url.username || url.password || url.search || url.hash || !/^bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com$/.test(url.hostname)) return errorResponse(400, "Refusing to sign an untrusted Bedrock destination")
             if (request.method !== "POST") return errorResponse(405, "Only POST requests are supported")
-            if (!ROUTES.some((r) => r.test(url.pathname))) return errorResponse(404, `Bedrock (AWS SSO) doesn't serve ${url.pathname}`)
+            if (!ROUTES.some((r) => r.test(url.pathname))) return errorResponse(404, `AWS Bedrock SSO doesn't serve ${url.pathname}`)
             // The account's region, whatever region the seed list was written for.
             url.hostname = `bedrock-runtime.${settings.region}.amazonaws.com`
             const body = request.body ? await request.text() : ""

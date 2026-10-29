@@ -1,5 +1,5 @@
 {
-  "name": "opencode-bedrock-sso-auth",
+  "name": "opencode-aws-bedrock-sso-auth",
   "version": "0.2.0",
   "description": "Amazon Bedrock in magpie (and OpenCode), signed with SigV4 from your AWS SSO / IAM Identity Center profile instead of a Bedrock API key",
   "type": "module",

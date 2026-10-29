@@ -26,6 +26,8 @@ test("config seeds Claude on Messages and GPT on chat completions", async () => 
   const cfg = {}
   await p.config(cfg)
   const prov = cfg.provider["bedrock-sso"]
+  assert.equal(p.auth.provider, "bedrock-sso")
+  assert.equal(prov.name, "AWS Bedrock SSO")
   assert.equal(prov.npm, "@ai-sdk/anthropic")
   assert.match(prov.api, /\/anthropic\/v1$/)
   assert.equal(prov.models["us.openai.gpt-6-luna"].provider.npm, "@ai-sdk/openai-compatible")

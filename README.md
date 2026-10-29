@@ -1,4 +1,6 @@
-# Bedrock SSO plugin for Magpie
+# AWS Bedrock SSO
+
+Package name: `opencode-aws-bedrock-sso-auth`. The provider ID remains `bedrock-sso`, so existing model selections do not change.
 
 Amazon Bedrock in Magpie (and OpenCode), signed with AWS Signature Version 4 from an AWS CLI profile. No Bedrock bearer API key.
 
