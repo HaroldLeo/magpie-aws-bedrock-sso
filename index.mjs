@@ -144,16 +144,9 @@ async function server() {
       // What this account's role can see in its region.
       async models(provider, { auth } = {}) {
         if (!auth) return provider?.models ?? {}
-        try {
-          const settings = settingsOf(auth)
-          const creds = await credentialsFor(settings.profile)
-          return listModels(creds, settings.region)
-        } catch (error) {
-          // SignInExpired.signIn === "expired": magpie marks the account.
-          // Any other failure returns the list magpie already had.
-          if (error instanceof SignInExpired) throw error
-          return provider?.models ?? {}
-        }
+        const settings = settingsOf(auth)
+        const creds = await credentialsFor(settings.profile)
+        return listModels(creds, settings.region)
       },
     },
 

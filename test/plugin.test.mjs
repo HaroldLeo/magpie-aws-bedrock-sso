@@ -102,19 +102,20 @@ test("provider.models throws SignInExpired with signIn expired", async () => {
   }
 })
 
-test("provider.models returns the given list when the vendor cannot be reached", async () => {
+test("provider.models propagates credential failures so Magpie preserves its saved catalog", async () => {
   const dir = await mkdtemp(join(tmpdir(), "bedrock-models-"))
   const exe = join(dir, "aws")
   const prior = process.env.MAGPIE_BEDROCK_AWS_CLI
-  const given = { "us.anthropic.claude-haiku-5-5": { name: "kept" } }
   try {
     await writeFile(exe, "#!/bin/sh\necho 'SSO configuration missing' >&2\nexit 1\n")
     await chmod(exe, 0o700)
     process.env.MAGPIE_BEDROCK_AWS_CLI = exe
     forget("nobody")
     const p = await server({})
-    const out = await p.provider.models({ models: given }, { auth })
-    assert.equal(out, given)
+    await assert.rejects(
+      p.provider.models({ models: { "us.anthropic.claude-haiku-5-5": { name: "seed" } } }, { auth }),
+      (error) => /export-credentials failed/.test(error.message) && error.signIn === undefined,
+    )
   } finally {
     forget("nobody")
     if (prior === undefined) delete process.env.MAGPIE_BEDROCK_AWS_CLI
