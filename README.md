@@ -26,7 +26,7 @@ The code is loaded from the installed checkout. Keep that directory in place. Re
 
 ## Authentication
 
-The plugin uses `aws configure export-credentials` with the chosen profile. The AWS CLI reads its own configuration and SSO cache. The plugin caches the exported role credentials in memory and refreshes them before they expire. Magpie stores the profile name, region, and account label, not AWS keys.
+The picker merges profile names from the AWS config and shared credentials files. It honors `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE`. It reads section names without launching a subprocess. Credential resolution still uses `aws configure export-credentials` with the chosen profile. The AWS CLI reads its own configuration and SSO cache. The plugin caches the exported role credentials in memory and refreshes them before they expire. Magpie stores the profile name, region, and account label, not AWS keys.
 
 When the SSO session expires, sign in again in Magpie or run:
 

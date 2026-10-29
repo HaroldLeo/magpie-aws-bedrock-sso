@@ -120,14 +120,14 @@ async function signedFetch(request, body, settings, retried = false) {
 }
 
 export const BedrockSsoPlugin = async () => {
-  // The sign-in offers profile sections from ~/.aws/config.
+  // The sign-in offers profile sections from both AWS files.
   const profiles = await listProfiles()
   const envProfile = process.env.AWS_PROFILE
   const ordered = envProfile && profiles.includes(envProfile) ? [envProfile, ...profiles.filter((p) => p !== envProfile)] : profiles
 
   const profilePrompt = ordered.length
-    ? { type: "select", key: "profile", message: "AWS profile (~/.aws/config)", options: ordered.map((p) => ({ label: p, value: p })) }
-    : { type: "text", key: "profile", message: "AWS profile (~/.aws/config)", placeholder: "default", validate: (v) => (!v || PROFILE.test(v) ? undefined : "Not a profile name") }
+    ? { type: "select", key: "profile", message: "AWS profile (config or credentials file)", options: ordered.map((p) => ({ label: p, value: p })) }
+    : { type: "text", key: "profile", message: "AWS profile (config or credentials file)", placeholder: "default", validate: (v) => (!v || PROFILE.test(v) ? undefined : "Not a profile name") }
 
   return {
     config: async (cfg) => {
