@@ -120,7 +120,7 @@ async function signedFetch(request, body, settings, retried = false) {
 }
 
 export const BedrockSsoPlugin = async () => {
-  // The sign-in offers the profiles ~/.aws/config has.
+  // The sign-in offers profile sections from ~/.aws/config.
   const profiles = await listProfiles()
   const envProfile = process.env.AWS_PROFILE
   const ordered = envProfile && profiles.includes(envProfile) ? [envProfile, ...profiles.filter((p) => p !== envProfile)] : profiles

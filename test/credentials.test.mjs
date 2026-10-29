@@ -3,7 +3,19 @@ import { test } from "node:test"
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { credentialsFor, forget, SignInExpired } from "../lib/credentials.mjs"
+import { credentialsFor, forget, SignInExpired, listProfiles } from "../lib/credentials.mjs"
+
+test("the picker reads profile sections without starting the AWS CLI", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "bedrock-profiles-"))
+  const config = join(dir, "config")
+  try {
+    await writeFile(config, "[default]\nregion=us-west-2\n[profile work]\nsso_session=login\n[sso-session login]\nsso_region=us-east-1\n[profile work]\n[profile another]\n")
+    assert.deepEqual(await listProfiles({ AWS_CONFIG_FILE: config }), ["default", "work", "another"])
+    assert.deepEqual(await listProfiles({ AWS_CONFIG_FILE: join(dir, "missing") }), [])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
 
 test("AWS CLI credentials are cached and explicitly refreshed", async () => {
   const dir = await mkdtemp(join(tmpdir(), "bedrock-sso-"))
