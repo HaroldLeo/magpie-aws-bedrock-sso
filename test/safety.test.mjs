@@ -1,7 +1,9 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import plugin from "../index.mjs"
 import { toConverse, streamChat } from "../lib/converse.mjs"
+import plugin from "../index.mjs"
+
+const server = plugin.server
 
 const tools = [{ type: "function", function: { name: "clock", parameters: { type: "object", properties: {} } } }]
 const chat = (fields = {}) => ({ model: "us.openai.gpt-6.1-terra", messages: [{ role: "user", content: "Hello" }], ...fields })
@@ -62,7 +64,7 @@ test("tool history without definitions cannot be sent as a different conversatio
 })
 
 test("malformed GPT requests are rejected at the plugin boundary", async () => {
-  const p = await plugin({})
+  const p = await server({})
   const l = await p.auth.loader(async () => ({ profile: "nobody", region: "us-west-2" }))
   const url = "https://bedrock-runtime.us-west-2.amazonaws.com/openai/v1/chat/completions"
   for (const data of [null, [], chat({ stream: "yes" }), chat({ messages: "bad" })]) {
@@ -73,7 +75,7 @@ test("malformed GPT requests are rejected at the plugin boundary", async () => {
 })
 
 test("signed GPT calls accept only model IDs, not URL paths", async () => {
-  const p = await plugin({})
+  const p = await server({})
   const l = await p.auth.loader(async () => ({ profile: "nobody", region: "us-west-2" }))
   const r = await l.fetch("https://bedrock-runtime.us-west-2.amazonaws.com/openai/v1/chat/completions", { method: "POST", body: JSON.stringify(chat({ model: "../other" })) })
   assert.equal(r.status, 400)
@@ -90,7 +92,7 @@ test("an empty event stream fails instead of reporting DONE", async () => {
 })
 
 test("the request boundary rejects unencrypted and nonstandard destinations", async () => {
-  const p = await plugin({})
+  const p = await server({})
   const l = await p.auth.loader(async () => ({ profile: "nobody", region: "us-west-2" }))
   for (const url of ["http://bedrock-runtime.us-west-2.amazonaws.com/anthropic/v1/messages", "https://bedrock-runtime.us-west-2.amazonaws.com:8443/anthropic/v1/messages", "https://user:secret@bedrock-runtime.us-west-2.amazonaws.com/anthropic/v1/messages", "https://bedrock-runtime.us-west-2.amazonaws.com/anthropic/v1/messages?redirect=evil"]) {
     const r = await l.fetch(url, { method: "POST", body: "{}" })

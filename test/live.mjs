@@ -2,7 +2,7 @@
 //   AWS_PROFILE=your-profile node test/live.mjs
 import assert from "node:assert/strict"
 import plugin from "../index.mjs"
-const p = await plugin({})
+const p = await plugin.server({})
 const cfg = {}; await p.config(cfg)
 console.log("seed models:", Object.keys(cfg.provider["bedrock-sso"].models))
 const m = p.auth.methods[0]

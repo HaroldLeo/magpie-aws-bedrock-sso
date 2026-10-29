@@ -1,4 +1,4 @@
-// Amazon Bedrock for magpie (and OpenCode), signed with AWS SigV4 from an AWS
+// Amazon Bedrock for Magpie, signed with AWS SigV4 from an AWS
 // SSO / IAM Identity Center profile. Unlike magpie's built-in Bedrock preset,
 // it needs no Bedrock API key, so it works for roles that lack
 // bedrock:CallWithBearerToken.
@@ -11,7 +11,7 @@ import { callerArn, credentialsFor, forget, listProfiles, profileRegion, SignInE
 import { anthropicBase, cachedMetadata, listModels, seedModels, isSupportedGpt } from "./lib/models.mjs"
 import { signRequest } from "./lib/sigv4.mjs"
 
-export const ID = "bedrock-sso"
+const ID = "bedrock-sso"
 const DEFAULT_REGION = "us-west-2"
 const REGION = /^[a-z]{2}(-gov)?-[a-z]+-\d$/
 const PROFILE = /^[A-Za-z0-9_.@+=-]{1,128}$/
@@ -119,7 +119,7 @@ async function signedFetch(request, body, settings, retried = false) {
   return res
 }
 
-export const BedrockSsoPlugin = async () => {
+async function server() {
   // The sign-in offers profile sections from both AWS files.
   const profiles = await listProfiles()
   const envProfile = process.env.AWS_PROFILE
@@ -133,7 +133,7 @@ export const BedrockSsoPlugin = async () => {
     config: async (cfg) => {
       cfg.provider ??= {}
       const p = (cfg.provider[ID] ??= {})
-      p.name ??= "Bedrock (AWS SSO)"
+      p.name ??= "AWS Bedrock SSO"
       p.npm ??= "@ai-sdk/anthropic"
       p.api ??= anthropicBase(DEFAULT_REGION)
       p.models = { ...seedModels(DEFAULT_REGION, await cachedMetadata()), ...(p.models ?? {}) }
@@ -145,7 +145,7 @@ export const BedrockSsoPlugin = async () => {
       async models(provider, { auth } = {}) {
         if (!auth) return provider?.models ?? {}
         const settings = settingsOf(auth)
-        const creds = await credentialsFor(settings.profile) // a SignInExpired carries signIn: "expired"
+        const creds = await credentialsFor(settings.profile)
         return listModels(creds, settings.region)
       },
     },
@@ -165,7 +165,6 @@ export const BedrockSsoPlugin = async () => {
             const region = inputs.region || (await profileRegion(profile)) || DEFAULT_REGION
             const settings = settingsOf({ profile, region })
             return {
-              url: "",
               method: "auto",
               instructions: `Uses the AWS CLI's SSO sign-in for profile "${settings.profile}" (${settings.region}). If its session has run out, the AWS sign-in page opens in your browser; approve it there.`,
               async callback() {
@@ -184,7 +183,7 @@ export const BedrockSsoPlugin = async () => {
                     type: "success",
                     access: "",
                     refresh: "",
-                    expires: 0,
+                    expires: 0, // no token for auth.refresh; AWS creds stay in-process
                     accountId: account ? `${who} (${account})` : who,
                     profile: settings.profile,
                     region: settings.region,
@@ -217,7 +216,7 @@ export const BedrockSsoPlugin = async () => {
             const url = new URL(request.url)
             if (url.protocol !== "https:" || url.port || url.username || url.password || url.search || url.hash || !/^bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com$/.test(url.hostname)) return errorResponse(400, "Refusing to sign an untrusted Bedrock destination")
             if (request.method !== "POST") return errorResponse(405, "Only POST requests are supported")
-            if (!ROUTES.some((r) => r.test(url.pathname))) return errorResponse(404, `Bedrock (AWS SSO) doesn't serve ${url.pathname}`)
+            if (!ROUTES.some((r) => r.test(url.pathname))) return errorResponse(404, `AWS Bedrock SSO doesn't serve ${url.pathname}`)
             // The account's region, whatever region the seed list was written for.
             url.hostname = `bedrock-runtime.${settings.region}.amazonaws.com`
             const body = request.body ? await request.text() : ""
@@ -230,4 +229,5 @@ export const BedrockSsoPlugin = async () => {
   }
 }
 
-export default BedrockSsoPlugin
+export const _internal = { ID, server }
+export default { id: ID, server }

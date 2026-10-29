@@ -1,16 +1,33 @@
 import assert from "node:assert/strict"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { test } from "node:test"
-import plugin from "../index.mjs"
+import plugin, { _internal } from "../index.mjs"
+import * as entry from "../index.mjs"
+import { forget, SignInExpired } from "../lib/credentials.mjs"
 import { geoOf, modelEntry, runtimeModel } from "../lib/models.mjs"
 import { signRequest } from "../lib/sigv4.mjs"
 
 const auth = { type: "success", profile: "nobody", region: "us-west-2" }
+const server = plugin.server
+
+test("the entry is one OpenCode v1 plugin; helpers live on _internal", () => {
+  assert.equal(plugin.id, "bedrock-sso")
+  assert.equal(typeof plugin.server, "function")
+  assert.equal(_internal.server, plugin.server)
+  assert.equal(_internal.ID, "bedrock-sso")
+  assert.equal(typeof plugin, "object")
+  assert.deepEqual(Object.values(entry).filter((v) => typeof v === "function"), [])
+})
 
 test("config seeds Claude on Messages and GPT on chat completions", async () => {
-  const p = await plugin({})
+  const p = await server({})
   const cfg = {}
   await p.config(cfg)
   const prov = cfg.provider["bedrock-sso"]
+  assert.equal(p.auth.provider, "bedrock-sso")
+  assert.equal(prov.name, "AWS Bedrock SSO")
   assert.equal(prov.npm, "@ai-sdk/anthropic")
   assert.match(prov.api, /\/anthropic\/v1$/)
   assert.equal(prov.models["us.openai.gpt-6-luna"].provider.npm, "@ai-sdk/openai-compatible")
@@ -18,7 +35,7 @@ test("config seeds Claude on Messages and GPT on chat completions", async () => 
 })
 
 test("the loader refuses other hosts and routes before signing anything", async () => {
-  const p = await plugin({})
+  const p = await server({})
   const l = await p.auth.loader(async () => auth)
   assert.equal((await l.fetch("https://example.com/anthropic/v1/messages", { method: "POST", body: "{}" })).status, 400)
   assert.equal((await l.fetch("https://bedrock-runtime.us-west-2.amazonaws.com/model/x/invoke", { method: "POST", body: "{}" })).status, 404)
@@ -58,4 +75,53 @@ test("sigv4 signs the scope, the session token and the body hash", () => {
   assert.equal(h.get("x-amz-content-sha256"), "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a")
   assert.match(h.get("authorization"), /^AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE\/20260102\/us-west-2\/bedrock\/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token, Signature=[0-9a-f]{64}$/)
   assert.equal(h.has("host"), false)
+})
+
+test("authorize is a prompt-only auto flow with no URL for magpie to open", async () => {
+  const p = await server({})
+  const a = await p.auth.methods[0].authorize({ profile: "work", region: "us-west-2" })
+  assert.equal(a.method, "auto")
+  assert.equal(Object.hasOwn(a, "url"), false)
+  assert.match(a.instructions, /work/)
+})
+
+test("provider.models throws SignInExpired with signIn expired", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "bedrock-models-"))
+  const exe = join(dir, "aws")
+  const prior = process.env.MAGPIE_BEDROCK_AWS_CLI
+  try {
+    await writeFile(exe, "#!/bin/sh\necho 'Error loading SSO Token: Token has expired' >&2\nexit 1\n")
+    await chmod(exe, 0o700)
+    process.env.MAGPIE_BEDROCK_AWS_CLI = exe
+    forget("nobody")
+    const p = await server({})
+    await assert.rejects(p.provider.models({ models: { seed: 1 } }, { auth }), (e) => e instanceof SignInExpired && e.signIn === "expired")
+  } finally {
+    forget("nobody")
+    if (prior === undefined) delete process.env.MAGPIE_BEDROCK_AWS_CLI
+    else process.env.MAGPIE_BEDROCK_AWS_CLI = prior
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test("provider.models propagates credential failures so Magpie preserves its saved catalog", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "bedrock-models-"))
+  const exe = join(dir, "aws")
+  const prior = process.env.MAGPIE_BEDROCK_AWS_CLI
+  try {
+    await writeFile(exe, "#!/bin/sh\necho 'SSO configuration missing' >&2\nexit 1\n")
+    await chmod(exe, 0o700)
+    process.env.MAGPIE_BEDROCK_AWS_CLI = exe
+    forget("nobody")
+    const p = await server({})
+    await assert.rejects(
+      p.provider.models({ models: { "us.anthropic.claude-haiku-5-5": { name: "seed" } } }, { auth }),
+      (error) => /export-credentials failed/.test(error.message) && error.signIn === undefined,
+    )
+  } finally {
+    forget("nobody")
+    if (prior === undefined) delete process.env.MAGPIE_BEDROCK_AWS_CLI
+    else process.env.MAGPIE_BEDROCK_AWS_CLI = prior
+    await rm(dir, { recursive: true, force: true })
+  }
 })
