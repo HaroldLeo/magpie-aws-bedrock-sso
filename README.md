@@ -6,7 +6,7 @@ Amazon Bedrock in Magpie, signed with AWS Signature Version 4 from an AWS CLI pr
 
 Magpie is the tested host. Direct OpenCode use is unverified. The `opencode` search keyword follows Magpie's discovery convention and does not claim OpenCode support.
 
-This is a candidate release. The repository stays private while distribution permission is unresolved. There is no published npm package.
+Released on npm as `magpie-aws-bedrock-sso`.
 
 ## What it signs in to
 
@@ -36,15 +36,15 @@ Limits and prices come from Magpie's local `amazon-bedrock` catalog when present
 
 Your AWS policies decide which models you can invoke.
 
-## Install from a local checkout
+## Install
 
 ```sh
-magpie plugin add /absolute/path/to/magpie-bedrock-sso
+magpie plugin add magpie-aws-bedrock-sso
 magpie plugin login bedrock-sso
 magpie provider refresh bedrock-sso
 ```
 
-The plugin loads from that folder. Keep the directory. `magpie provider bedrock-sso` lists exposed and hidden models; `magpie provider models bedrock-sso +<model-id>` exposes one.
+From a local checkout, pass the folder path instead of the package name and keep that directory. `magpie provider bedrock-sso` lists exposed and hidden models; `magpie provider models bedrock-sso +<model-id>` exposes one.
 
 ## Requests and limits
 
@@ -62,4 +62,8 @@ Live tests send billable Bedrock prompts. `gateway-live.mjs` needs an isolated M
 
 ## Release status
 
-Do not publish to npm or add the `magpie-plugin` GitHub topic until distribution permission is settled. Confirm license, review credential handling, and test Magpie versions first.
+Released on npm as `magpie-aws-bedrock-sso`.
+
+```sh
+magpie plugin add magpie-aws-bedrock-sso
+```
