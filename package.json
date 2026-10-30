@@ -1,6 +1,6 @@
 {
   "name": "magpie-aws-bedrock-sso",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Amazon Bedrock in Magpie, signed with SigV4 from your AWS SSO / IAM Identity Center profile instead of a Bedrock API key",
   "type": "module",
   "main": "./index.mjs",
