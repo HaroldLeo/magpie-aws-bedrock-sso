@@ -72,6 +72,8 @@ Replace `your-profile` with your AWS profile name. Both live scripts send billab
 
 To install from a local checkout, pass the folder path to `magpie plugin add` instead of the package name, and keep that directory.
 
+See [RELEASING.md](https://github.com/HaroldLeo/magpie-aws-bedrock-sso/blob/main/RELEASING.md) for trusted npm publishing and PR auto-merge.
+
 ## License
 
 MIT
