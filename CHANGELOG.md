@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Publish the rewritten README for the npm page
+- Update repository and issue links to `HaroldLeo/magpie-aws-bedrock-sso`
+
 ## 0.3.0
 
 First npm release as `magpie-aws-bedrock-sso`. The provider id stays `bedrock-sso`.
