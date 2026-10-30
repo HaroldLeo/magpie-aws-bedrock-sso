@@ -1,16 +1,41 @@
 {
   "name": "magpie-aws-bedrock-sso",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "description": "Amazon Bedrock in Magpie, signed with SigV4 from your AWS SSO / IAM Identity Center profile instead of a Bedrock API key",
   "type": "module",
   "main": "./index.mjs",
   "exports": "./index.mjs",
-  "files": ["index.mjs", "lib/", "README.md", "LICENSE"],
-  "repository": { "type": "git", "url": "git+https://github.com/HaroldLeo/magpie-aws-bedrock-sso.git" },
-  "bugs": { "url": "https://github.com/HaroldLeo/magpie-aws-bedrock-sso/issues" },
-  "engines": { "node": ">=20" },
-  "scripts": { "test": "node --test test/*.test.mjs", "test:live": "node test/live.mjs", "test:gateway": "node test/gateway-live.mjs" },
-  "keywords": ["opencode", "auth", "provider", "magpie", "bedrock", "aws", "sso", "sigv4"],
+  "files": [
+    "index.mjs",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HaroldLeo/magpie-aws-bedrock-sso.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HaroldLeo/magpie-aws-bedrock-sso/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:live": "node test/live.mjs",
+    "test:gateway": "node test/gateway-live.mjs"
+  },
+  "keywords": [
+    "opencode",
+    "auth",
+    "provider",
+    "magpie",
+    "bedrock",
+    "aws",
+    "sso",
+    "sigv4"
+  ],
   "license": "MIT",
   "magpie": {
     "maxConcurrency": 8,
