@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Usage: this week's Bedrock spend from CloudWatch token metrics in `magpie quota`, with Cost Explorer's billed week and month behind an off-by-default switch (Cost Explorer charges per call)
+- Optional weekly budget asked at sign-in and kept per account, with its week start; **Stop at weekly budget** switch makes Magpie's routing move to fallbacks once it's spent
+- Plugin options for a monthly budget, more metric regions and refresh time
+- Spend readings saved in Magpie's config folder, so restarts and `magpie quota` don't ask AWS again
+- Geography profiles missing from the catalog are priced from their in-region model instead of $0
+- SigV4 signs `x-amz-target` when a request has one
+
 ## 0.3.1
 
 - Publish the rewritten README for the npm page

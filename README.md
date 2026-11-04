@@ -36,7 +36,48 @@ After sign-in and refresh, the catalog lists active, system-defined Claude and s
 
 Model names look like `bedrock-sso/us.anthropic.claude-opus-5-5` and `bedrock-sso/us.openai.gpt-6.1-terra`. Claude goes through Bedrock's Anthropic Messages API, and GPT goes through Converse.
 
-Limits and prices come from Magpie's local `amazon-bedrock` catalog for matching model IDs. Otherwise limits are estimates, and unknown prices may appear as zero. Cost estimates are not bills.
+Limits and prices come from Magpie's local `amazon-bedrock` catalog for matching model IDs. A geography profile the catalog lacks (`us.openai.gpt-5.4`) uses its in-region entry (`openai.gpt-5.4`) instead of showing $0. Otherwise limits are estimates, and unknown prices may appear as zero. Cost estimates are not bills.
+
+## Usage and budgets
+
+The account's Bedrock spend shows in `magpie quota` and on the account's card. It counts every caller in the AWS account, not only Magpie.
+
+- **This week** (on by default): CloudWatch's hourly `AWS/Bedrock` token counts (input, output, cache read and write, and the long-context share), priced from the catalog. Close to real time, refreshed at most every 15 minutes. A `+` means some model had no price. AWS charges about $0.01 per 1,000 metrics read; an account using a dozen models comes to roughly $1 a month.
+- **Billed totals** (off by default): Cost Explorer's daily cost for every Bedrock service, Marketplace model editions included. It's what AWS actually charges, but a day or more behind. AWS charges $0.01 for each Cost Explorer call, so it's read at most every 6 hours, about $1.20 a month. Turn it on in the provider's editor (**Billed totals from Cost Explorer**).
+
+Readings are saved in `~/.config/magpie/bedrock-sso-spend.json`: only sums and times, no credentials. A restart, or `magpie quota` in a terminal, reuses them instead of asking AWS again.
+
+### Budgets (optional)
+
+There's no budget by default: spend is shown, and nothing stops. If your company or your own plan caps Bedrock spend, give the plugin the cap:
+
+1. **When you sign in**, answer *Weekly Bedrock budget in US$* (leave it blank for none), then the day and hour (UTC) the week starts. The budget is kept with that account, so two accounts can have different ones. To change it, sign in to the account again.
+2. The card then shows the week as a share of the budget, like `Weekly 40% ($80 / $200)`.
+3. To have Magpie **stop at the budget**, turn on **Stop at weekly budget** in the provider's editor. Once the estimate reaches the budget, Magpie moves requests to the fallbacks you set (`magpie provider fallback bedrock-sso <provider/model>…`) until the week resets. With the switch off, the budget is shown only.
+
+Set the week to match your cap's own reset. For example, a cap that resets Sundays at 07:00 UTC is Sunday, hour 7.
+
+#### Advanced options
+
+For a monthly budget, more regions or other settings, use the plugin's Options: **Plugins › Installed › AWS Bedrock SSO › Options** in the app, or the terminal. These apply to every account and override what was given at sign-in; `null` leaves the sign-in's value.
+
+```sh
+magpie plugin options magpie-aws-bedrock-sso '{"weeklyBudget": 200, "weekResetDay": "mon"}'
+magpie plugin options magpie-aws-bedrock-sso off   # back to the defaults
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `weeklyBudget` | the sign-in's, else none | US$ a week, against the CloudWatch estimate |
+| `monthlyBudget` | none | US$ a calendar month (UTC), against Cost Explorer's bill, which lags a day. Needs billed totals on |
+| `weekResetDay`, `weekResetHour` | the sign-in's, else `sun`, `0` | When the week starts, in UTC |
+| `metricRegions` | the sign-in region | Regions whose token metrics count, like `["us-west-2", "us-east-1"]` |
+| `refreshMinutes` | `15` | How long a CloudWatch reading is kept (5 or more) |
+| `estimate`, `usage` | `true` | `false` turns off the estimate, or all usage |
+
+Amounts may be written `200` or `"$1,200"`. A setting that can't be read shows on the account's card as not used, and the rest still apply.
+
+The profile needs `cloudwatch:ListMetrics` and `cloudwatch:GetMetricData` for the estimate, and `ce:GetCostAndUsage` for billed totals. A source it can't read is listed as not read; the other still shows.
 
 ## Sign-in
 

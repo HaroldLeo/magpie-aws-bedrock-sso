@@ -10,6 +10,8 @@ import { fromConverse, openaiError, streamChat, toConverse } from "./lib/convers
 import { callerArn, credentialsFor, forget, listProfiles, profileRegion, SignInExpired, ssoLogin } from "./lib/credentials.mjs"
 import { anthropicBase, cachedMetadata, listModels, seedModels, isSupportedGpt } from "./lib/models.mjs"
 import { signRequest } from "./lib/sigv4.mjs"
+import { billedDays, budgetOf, monthStart, priceUsage, tokenUsage, usageWindows, weekStart } from "./lib/spend.mjs"
+import { spendStore } from "./lib/store.mjs"
 
 const ID = "bedrock-sso"
 const DEFAULT_REGION = "us-west-2"
@@ -119,7 +121,166 @@ async function signedFetch(request, body, settings, retried = false) {
   return res
 }
 
-async function server() {
+// Cost Explorer charges for each call, so its reading is kept this long.
+const BILLED_TTL_MS = 6 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// The provider editor's switches (magpie's own, read with
+// input.magpie.option). Both are off unless the user turns them on.
+const SWITCHES = {
+  enforce: "stop_at_budget",
+  billed: "billed_totals",
+}
+
+// magpie's usage reading for one account: this week's spend estimated from
+// CloudWatch token counts and, when asked for, what Cost Explorer has
+// billed. Readings are kept in memory and on disk (store), so restarts and
+// other magpie processes reuse them; each source is refreshed on its own
+// and fails on its own, keeping its last good reading.
+function spendReader({ fetchImpl = fetch, now = () => new Date(), credentials = credentialsFor, metadata = cachedMetadata, store = spendStore() } = {}) {
+  const pending = new Map() // key -> a reading in flight, shared by callers
+  return async function read(settings, options = {}) {
+    const budget = budgetOf(options)
+    const at = now()
+    const regions = budget.regions ?? [settings.region]
+    const start = weekStart(at, budget.week)
+    const key = JSON.stringify([settings.profile, regions, start.toISOString()])
+    const wantEstimate = options.estimate !== false
+    const wantBilled = options.billed === true
+    const fresh = (t, ttl) => t && at.getTime() - t >= 0 && at.getTime() - t < ttl
+
+    const refresh = async () => {
+      const entry = { ...((await store.get(key)) ?? {}) }
+      const needEstimate = wantEstimate && !fresh(entry.estimateAt, budget.refreshMs)
+      const needBilled = wantBilled && !fresh(entry.billedAt, BILLED_TTL_MS)
+      if (!needEstimate && !needBilled) return { entry, problems: [] }
+      let creds
+      try {
+        creds = await credentials(settings.profile)
+      } catch (error) {
+        return { entry, problems: [], signInError: error }
+      }
+      const problems = []
+      const retry = async (fn) => {
+        try {
+          return await fn(creds)
+        } catch (error) {
+          if (!error.expiredCredentials) throw error
+          forget(settings.profile)
+          creds = await credentials(settings.profile)
+          return fn(creds)
+        }
+      }
+      if (needEstimate) {
+        try {
+          const usage = {}
+          for (const region of regions) {
+            for (const [model, u] of Object.entries(await retry((c) => tokenUsage(c, region, { start, end: at, fetchImpl })))) {
+              const sum = (usage[model] ??= { all: {}, long: {} })
+              for (const part of ["all", "long"]) for (const [k, v] of Object.entries(u[part])) sum[part][k] = (sum[part][k] ?? 0) + v
+            }
+          }
+          const priced = priceUsage(usage, await metadata())
+          entry.estimate = { usd: priced.usd, unpriced: priced.unpriced }
+          entry.estimateAt = at.getTime()
+        } catch (error) {
+          problems.push(`token metrics: ${error.message}`)
+        }
+      }
+      if (needBilled) {
+        try {
+          const from = new Date(Math.min(monthStart(at).getTime(), start.getTime()))
+          entry.billed = await retry((c) => billedDays(c, { start: from, end: new Date(at.getTime() + DAY_MS), fetchImpl }))
+          entry.billedAt = at.getTime()
+        } catch (error) {
+          problems.push(`Cost Explorer: ${error.message}`)
+        }
+      }
+      if (entry.estimateAt || entry.billedAt) await store.set(key, entry)
+      return { entry, problems }
+    }
+
+    // Readings asked for at once (magpie's card and its routing) share one
+    // trip to AWS.
+    let job = pending.get(key)
+    if (!job) {
+      job = refresh().finally(() => pending.delete(key))
+      pending.set(key, job)
+    }
+    const { entry, problems, signInError } = await job
+    const estimate = wantEstimate ? entry.estimate : undefined
+    const billed = wantBilled ? entry.billed : undefined
+    if (signInError && !estimate && !billed) {
+      return { error: signInError.message, windows: [], signIn: signInError instanceof SignInExpired ? "expired" : "kept" }
+    }
+    const windows = usageWindows({ now: at, budget, estimate, billed, enforce: options.enforce === true })
+    if (!windows.length && problems.length) return { error: problems.join("; "), windows: [], signIn: "kept" }
+    if (problems.length) windows.push({ name: "Not read", display: problems.join("; "), aside: true })
+    // A setting that can't be read is left at its default, and said so.
+    if (budget.problems.length) windows.push({ name: "Options", display: `not used: ${budget.problems.join("; ")}`, aside: true })
+    return { windows, signIn: signInError instanceof SignInExpired ? "expired" : "kept" }
+  }
+}
+
+// The budget answers a sign-in keeps on the account (the sign-in questions
+// below), as the option names budgetOf reads.
+function budgetFromAuth(auth = {}) {
+  const out = {}
+  if (auth.weeklyBudget !== undefined && auth.weeklyBudget !== "") out.weeklyBudget = auth.weeklyBudget
+  if (auth.weekResetDay) out.weekResetDay = auth.weekResetDay
+  if (auth.weekResetHour !== undefined && auth.weekResetHour !== "") out.weekResetHour = auth.weekResetHour
+  return out
+}
+
+// Sign-in questions for an optional budget. The reset is asked only once a
+// budget is given.
+const BUDGET_PROMPTS = [
+  {
+    type: "text",
+    key: "weeklyBudget",
+    message: "Weekly Bedrock budget in US$ (optional, blank for none)",
+    placeholder: "none",
+    validate: (v) => (!v || budgetOf({ weeklyBudget: v }).weekly ? undefined : "An amount like 200, or blank"),
+  },
+  {
+    type: "select",
+    key: "weekResetDay",
+    message: "The budget's week starts on (UTC)",
+    when: { key: "weeklyBudget", op: "neq", value: "" },
+    options: ["mon", "sun", "sat", "tue", "wed", "thu", "fri"].map((d) => ({ label: { sun: "Sunday", mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday" }[d], value: d })),
+  },
+  {
+    type: "text",
+    key: "weekResetHour",
+    message: "At this hour, UTC (0-23)",
+    placeholder: "0",
+    when: { key: "weeklyBudget", op: "neq", value: "" },
+    validate: (v) => (!v || /^(\d|1\d|2[0-3])$/.test(String(v).trim()) ? undefined : "A whole hour from 0 to 23"),
+  },
+]
+
+async function server(input, pluginOptions) {
+  const readSpend = spendReader()
+  // A provider-editor switch as the user set it; off outside magpie.
+  const on = (key) => {
+    try {
+      return input?.magpie?.option?.(ID, key) === true
+    } catch {
+      return false
+    }
+  }
+  // The usage settings, later ones winning: the account's sign-in answers,
+  // the plugin's JSON options (`magpie plugin options …`, for the rest),
+  // then the editor's switches.
+  const usageOptions = (auth) => {
+    const json = pluginOptions && typeof pluginOptions === "object" && !Array.isArray(pluginOptions) ? pluginOptions : {}
+    // A blank JSON value (the Options example's null) leaves the account's own.
+    const set = Object.fromEntries(Object.entries(json).filter(([, v]) => v !== null && v !== undefined && v !== ""))
+    const out = { ...budgetFromAuth(auth), ...set }
+    if (on(SWITCHES.enforce)) out.enforce = true
+    if (on(SWITCHES.billed)) out.billed = true
+    return out
+  }
   // The sign-in offers profile sections from both AWS files.
   const profiles = await listProfiles()
   const envProfile = process.env.AWS_PROFILE
@@ -152,6 +313,35 @@ async function server() {
 
     auth: {
       provider: ID,
+      // magpie's own hook: what the account has spent on Bedrock.
+      async usage(getAuth) {
+        let auth
+        let settings
+        try {
+          auth = await getAuth()
+          if (!auth) return { windows: [] }
+          settings = settingsOf(auth)
+        } catch (error) {
+          return { error: error.message, windows: [], signIn: "kept" }
+        }
+        const opts = usageOptions(auth)
+        if (opts.usage === false) return { windows: [] }
+        return readSpend(settings, opts)
+      },
+      // magpie's own switches, in the provider's editor. Off by default.
+      options: [
+        {
+          key: SWITCHES.enforce,
+          label: "Stop at weekly budget",
+          description: "Once this week's estimated spend reaches the weekly budget, magpie moves requests to your fallbacks until the week resets. Off: the budget is shown only. Set the budget when you sign in, or in the plugin's Options.",
+        },
+        {
+          key: SWITCHES.billed,
+          label: "Billed totals from Cost Explorer",
+          description: "Shows what AWS has billed this week and month. AWS charges $0.01 for each Cost Explorer call; the plugin calls it at most every 6 hours, about $1.20 a month. Needs ce:GetCostAndUsage.",
+          confirm: "AWS charges the account $0.01 for each Cost Explorer call. The plugin calls it at most every 6 hours, about $1.20 a month.",
+        },
+      ],
       methods: [
         {
           type: "oauth",
@@ -159,6 +349,7 @@ async function server() {
           prompts: [
             profilePrompt,
             { type: "text", key: "region", message: "Bedrock region (blank: the profile's, else us-west-2)", placeholder: DEFAULT_REGION, validate: (v) => (!v || REGION.test(v) ? undefined : "Like us-west-2") },
+            ...BUDGET_PROMPTS,
           ],
           async authorize(inputs = {}) {
             const profile = inputs.profile || envProfile || "default"
@@ -187,6 +378,12 @@ async function server() {
                     accountId: account ? `${who} (${account})` : who,
                     profile: settings.profile,
                     region: settings.region,
+                    // the optional budget, kept with the account
+                    ...budgetFromAuth({
+                      weeklyBudget: typeof inputs.weeklyBudget === "string" ? inputs.weeklyBudget.trim() : undefined,
+                      weekResetDay: inputs.weeklyBudget ? inputs.weekResetDay : undefined,
+                      weekResetHour: inputs.weeklyBudget && typeof inputs.weekResetHour === "string" ? inputs.weekResetHour.trim() : undefined,
+                    }),
                   }
                 } catch (error) {
                   return { type: "failed", error: error.message }
@@ -229,5 +426,5 @@ async function server() {
   }
 }
 
-export const _internal = { ID, server }
+export const _internal = { ID, server, spendReader, budgetFromAuth, SWITCHES }
 export default { id: ID, server }
