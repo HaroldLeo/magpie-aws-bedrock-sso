@@ -45,7 +45,7 @@ The account's Bedrock spend shows in `magpie quota` and on the account's card. I
 - **This week** (on by default): CloudWatch's hourly `AWS/Bedrock` token counts (input, output, cache read and write, and the long-context share), priced from the catalog. Close to real time, refreshed at most every 15 minutes. A `+` means some model had no price. AWS charges about $0.01 per 1,000 metrics read; an account using a dozen models comes to roughly $1 a month.
 - **Billed totals** (off by default): Cost Explorer's daily cost for every Bedrock service, Marketplace model editions included. It's what AWS actually charges, but a day or more behind. AWS charges $0.01 for each Cost Explorer call, so it's read at most every 6 hours, about $1.20 a month. Turn it on in the provider's editor (**Billed totals from Cost Explorer**).
 
-Readings are saved in `~/.config/magpie/bedrock-sso-spend.json`, keyed by AWS account (found with the free `sts:GetCallerIdentity`): only sums, times and hashed keys, no credentials, profile names or account ids. A restart, or `magpie quota` in a terminal, reuses them instead of asking AWS again, and when two processes need a new reading at once, one asks AWS and the other waits for its answer.
+Readings are saved in `~/.config/magpie/bedrock-sso-spend.json`, keyed by AWS account (found with STS `GetCallerIdentity`, which is free and needs no permission): only sums, times and hashed keys, no credentials, profile names or account ids. A restart, or `magpie quota` in a terminal, reuses them instead of asking AWS again, and when two processes need a new reading at once, one asks AWS and the other waits for its answer.
 
 ### Budgets (optional)
 
@@ -77,7 +77,7 @@ magpie plugin options magpie-aws-bedrock-sso off   # back to the defaults
 
 Amounts may be written `200` or `"$1,200"`. A setting that can't be read shows on the account's card as not used, and the rest still apply.
 
-The profile needs `sts:GetCallerIdentity` (allowed for every identity unless an SCP denies it), `cloudwatch:ListMetrics` and `cloudwatch:GetMetricData` for the estimate, and `ce:GetCostAndUsage` for billed totals. A source it can't read is listed as not read; the other still shows.
+The profile needs `cloudwatch:ListMetrics` and `cloudwatch:GetMetricData` for the estimate, and `ce:GetCostAndUsage` for billed totals. A source it can't read is listed as not read; the other still shows.
 
 ## Sign-in
 

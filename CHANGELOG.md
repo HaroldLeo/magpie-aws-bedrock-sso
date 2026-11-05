@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - Usage: this week's Bedrock spend from CloudWatch token metrics in `magpie quota`, with Cost Explorer's billed week and month behind an off-by-default switch (Cost Explorer charges per call)
 - Optional weekly budget asked at sign-in and kept per account, with its week start; **Stop at weekly budget** switch makes Magpie's routing move to fallbacks once it's spent
