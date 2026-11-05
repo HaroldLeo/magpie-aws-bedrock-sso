@@ -8,7 +8,7 @@
 - Spend readings saved in Magpie's config folder, so restarts and `magpie quota` don't ask AWS again
 - Geography profiles missing from the catalog are priced from their in-region model instead of $0
 - SigV4 signs `x-amz-target` when a request has one
-- Icon: the Bedrock logo from LobeHub Icons (MIT), as Magpie's built-in Bedrock provider uses
+- Icon: the Bedrock logo from LobeHub Icons (MIT, notice in `THIRD_PARTY_NOTICES.md`), as Magpie's built-in Bedrock provider uses
 
 ## 0.3.1
 

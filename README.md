@@ -45,7 +45,7 @@ The account's Bedrock spend shows in `magpie quota` and on the account's card. I
 - **This week** (on by default): CloudWatch's hourly `AWS/Bedrock` token counts (input, output, cache read and write, and the long-context share), priced from the catalog. Close to real time, refreshed at most every 15 minutes. A `+` means some model had no price. AWS charges about $0.01 per 1,000 metrics read; an account using a dozen models comes to roughly $1 a month.
 - **Billed totals** (off by default): Cost Explorer's daily cost for every Bedrock service, Marketplace model editions included. It's what AWS actually charges, but a day or more behind. AWS charges $0.01 for each Cost Explorer call, so it's read at most every 6 hours, about $1.20 a month. Turn it on in the provider's editor (**Billed totals from Cost Explorer**).
 
-Readings are saved in `~/.config/magpie/bedrock-sso-spend.json`: only sums and times, no credentials. A restart, or `magpie quota` in a terminal, reuses them instead of asking AWS again.
+Readings are saved in `~/.config/magpie/bedrock-sso-spend.json`, keyed by AWS account (found with the free `sts:GetCallerIdentity`): only sums, times and hashed keys, no credentials, profile names or account ids. A restart, or `magpie quota` in a terminal, reuses them instead of asking AWS again, and when two processes need a new reading at once, one asks AWS and the other waits for its answer.
 
 ### Budgets (optional)
 
@@ -59,7 +59,7 @@ Set the week to match your cap's own reset. For example, a cap that resets Sunda
 
 #### Advanced options
 
-For a monthly budget, more regions or other settings, use the plugin's Options: **Plugins › Installed › AWS Bedrock SSO › Options** in the app, or the terminal. These apply to every account and override what was given at sign-in; `null` leaves the sign-in's value.
+For a monthly budget, more regions or other settings, use the plugin's Options: **Plugins › Installed › AWS Bedrock SSO › Options** in the app, or the terminal. A value here applies to every account and overrides what was given at sign-in; `null` leaves the sign-in's value. Billed totals and stopping at the budget are only ever the switches above, since one costs money and the other stops requests.
 
 ```sh
 magpie plugin options magpie-aws-bedrock-sso '{"weeklyBudget": 200, "weekResetDay": "mon"}'
@@ -69,7 +69,7 @@ magpie plugin options magpie-aws-bedrock-sso off   # back to the defaults
 | Option | Default | Meaning |
 |---|---|---|
 | `weeklyBudget` | the sign-in's, else none | US$ a week, against the CloudWatch estimate |
-| `monthlyBudget` | none | US$ a calendar month (UTC), against Cost Explorer's bill, which lags a day. Needs billed totals on |
+| `monthlyBudget` | none | US$ a calendar month (UTC), against Cost Explorer's bill, which lags a day. Shown only (it never stops requests); needs billed totals on |
 | `weekResetDay`, `weekResetHour` | the sign-in's, else `sun`, `0` | When the week starts, in UTC |
 | `metricRegions` | the sign-in region | Regions whose token metrics count, like `["us-west-2", "us-east-1"]` |
 | `refreshMinutes` | `15` | How long a CloudWatch reading is kept (5 or more) |
@@ -77,7 +77,7 @@ magpie plugin options magpie-aws-bedrock-sso off   # back to the defaults
 
 Amounts may be written `200` or `"$1,200"`. A setting that can't be read shows on the account's card as not used, and the rest still apply.
 
-The profile needs `cloudwatch:ListMetrics` and `cloudwatch:GetMetricData` for the estimate, and `ce:GetCostAndUsage` for billed totals. A source it can't read is listed as not read; the other still shows.
+The profile needs `sts:GetCallerIdentity` (allowed for every identity unless an SCP denies it), `cloudwatch:ListMetrics` and `cloudwatch:GetMetricData` for the estimate, and `ce:GetCostAndUsage` for billed totals. A source it can't read is listed as not read; the other still shows.
 
 ## Sign-in
 
@@ -117,4 +117,4 @@ See [RELEASING.md](https://github.com/HaroldLeo/magpie-aws-bedrock-sso/blob/main
 
 ## License
 
-MIT
+MIT. The icon is from [LobeHub Icons](https://github.com/lobehub/lobe-icons) (MIT); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

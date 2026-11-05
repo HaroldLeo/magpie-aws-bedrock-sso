@@ -6,16 +6,17 @@
 //   Claude  -> https://bedrock-runtime.<region>.amazonaws.com/anthropic/v1/messages
 //   OpenAI  -> magpie speaks chat completions; the plugin sends them to
 //              https://bedrock-runtime.<region>.amazonaws.com/model/<id>/converse[-stream]
+import { createHash, randomUUID } from "node:crypto"
 import { fromConverse, openaiError, streamChat, toConverse } from "./lib/converse.mjs"
 import { callerArn, credentialsFor, forget, listProfiles, profileRegion, SignInExpired, ssoLogin } from "./lib/credentials.mjs"
 import { anthropicBase, cachedMetadata, listModels, seedModels, isSupportedGpt } from "./lib/models.mjs"
 import { signRequest } from "./lib/sigv4.mjs"
-import { billedDays, budgetOf, monthStart, priceUsage, tokenUsage, usageWindows, weekStart } from "./lib/spend.mjs"
+import { AWS_REGION, billedDays, budgetOf, callerAccount, monthStart, priceUsage, tokenUsage, usageWindows, weekStart, ymd } from "./lib/spend.mjs"
 import { spendStore } from "./lib/store.mjs"
 
 const ID = "bedrock-sso"
 const DEFAULT_REGION = "us-west-2"
-const REGION = /^[a-z]{2}(-gov)?-[a-z]+-\d$/
+const REGION = AWS_REGION
 const PROFILE = /^[A-Za-z0-9_.@+=-]{1,128}$/
 
 // These are the incoming SDK routes served by the plugin.
@@ -131,94 +132,184 @@ const SWITCHES = {
   enforce: "stop_at_budget",
   billed: "billed_totals",
 }
+// JSON options that only the switches may set, with the switch to use.
+const SWITCH_OPTIONS = { enforce: "Stop at weekly budget", billed: "Billed totals from Cost Explorer" }
+
+// A process asking AWS for a reading holds its claim this long at most
+// (a claim older than that was left by a process that died); the others
+// wait this long for its answer, then show the last reading they have.
+const CLAIM_MS = 60 * 1000
+const CLAIM_WAIT_MS = 20 * 1000
+// The AWS account a profile signs in to is checked again after this long.
+const ACCOUNT_TTL_MS = 15 * 60 * 1000
+
+const hashed = (...parts) => createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 32)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // magpie's usage reading for one account: this week's spend estimated from
 // CloudWatch token counts and, when asked for, what Cost Explorer has
-// billed. Readings are kept in memory and on disk (store), so restarts and
-// other magpie processes reuse them; each source is refreshed on its own
-// and fails on its own, keeping its last good reading.
-function spendReader({ fetchImpl = fetch, now = () => new Date(), credentials = credentialsFor, metadata = cachedMetadata, store = spendStore() } = {}) {
-  const pending = new Map() // key -> a reading in flight, shared by callers
+// billed. Each source is its own entry in the store, keyed by the AWS
+// account (not the profile name) and what it counts:
+//   estimate  account, regions, week start; kept refreshMinutes
+//   billed    account; the last 7 days and this month, kept 6 hours
+// The store is on disk, so restarts and other magpie processes reuse the
+// readings; a process about to ask AWS claims the entry first, and the
+// others wait for its answer instead of paying for their own. A source that
+// fails keeps its last good reading and says so.
+function spendReader({
+  fetchImpl = fetch,
+  now = () => new Date(),
+  credentials = credentialsFor,
+  metadata = cachedMetadata,
+  store = spendStore(),
+  account = (creds, region) => callerAccount(creds, { region, fetchImpl }),
+  wait = sleep,
+} = {}) {
+  const me = randomUUID()
+  const pending = new Map() // store key -> a refresh in flight in this process
+  const once = (key, fn) => {
+    let job = pending.get(key)
+    if (!job) {
+      job = fn().finally(() => pending.delete(key))
+      pending.set(key, job)
+    }
+    return job
+  }
+
   return async function read(settings, options = {}) {
     const budget = budgetOf(options)
     const at = now()
+    const t = at.getTime()
     const regions = budget.regions ?? [settings.region]
     const start = weekStart(at, budget.week)
-    const key = JSON.stringify([settings.profile, regions, start.toISOString()])
     const wantEstimate = options.estimate !== false
     const wantBilled = options.billed === true
-    const fresh = (t, ttl) => t && at.getTime() - t >= 0 && at.getTime() - t < ttl
+    const fresh = (when, ttl) => when && t - when >= 0 && t - when < ttl
+    const problems = []
+    let expired = false
 
-    const refresh = async () => {
-      const entry = { ...((await store.get(key)) ?? {}) }
-      const needEstimate = wantEstimate && !fresh(entry.estimateAt, budget.refreshMs)
-      const needBilled = wantBilled && !fresh(entry.billedAt, BILLED_TTL_MS)
-      if (!needEstimate && !needBilled) return { entry, problems: [] }
-      let creds
+    // Credentials, fetched at most once a reading; an expired SSO session
+    // marks the account, wherever it turns up.
+    let creds
+    const getCreds = async (again = false) => {
+      if (again) {
+        forget(settings.profile)
+        creds = undefined
+      }
       try {
-        creds = await credentials(settings.profile)
+        return (creds ??= await credentials(settings.profile))
       } catch (error) {
-        return { entry, problems: [], signInError: error }
+        if (error instanceof SignInExpired) expired = true
+        throw error
       }
-      const problems = []
-      const retry = async (fn) => {
-        try {
-          return await fn(creds)
-        } catch (error) {
-          if (!error.expiredCredentials) throw error
-          forget(settings.profile)
-          creds = await credentials(settings.profile)
-          return fn(creds)
-        }
+    }
+    const withCreds = async (fn) => {
+      try {
+        return await fn(await getCreds())
+      } catch (error) {
+        if (!error.expiredCredentials) throw error
+        return fn(await getCreds(true))
       }
-      if (needEstimate) {
-        try {
-          const usage = {}
-          for (const region of regions) {
-            for (const [model, u] of Object.entries(await retry((c) => tokenUsage(c, region, { start, end: at, fetchImpl })))) {
-              const sum = (usage[model] ??= { all: {}, long: {} })
-              for (const part of ["all", "long"]) for (const [k, v] of Object.entries(u[part])) sum[part][k] = (sum[part][k] ?? 0) + v
-            }
-          }
-          const priced = priceUsage(usage, await metadata())
-          entry.estimate = { usd: priced.usd, unpriced: priced.unpriced }
-          entry.estimateAt = at.getTime()
-        } catch (error) {
-          problems.push(`token metrics: ${error.message}`)
-        }
-      }
-      if (needBilled) {
-        try {
-          const from = new Date(Math.min(monthStart(at).getTime(), start.getTime()))
-          entry.billed = await retry((c) => billedDays(c, { start: from, end: new Date(at.getTime() + DAY_MS), fetchImpl }))
-          entry.billedAt = at.getTime()
-        } catch (error) {
-          problems.push(`Cost Explorer: ${error.message}`)
-        }
-      }
-      if (entry.estimateAt || entry.billedAt) await store.set(key, entry)
-      return { entry, problems }
     }
 
-    // Readings asked for at once (magpie's card and its routing) share one
-    // trip to AWS.
-    let job = pending.get(key)
-    if (!job) {
-      job = refresh().finally(() => pending.delete(key))
-      pending.set(key, job)
+    // Which AWS account the profile's credentials are for now. The answer is
+    // kept by the credentials themselves (a hash of their key id), so a
+    // profile pointed elsewhere, or other credentials, is looked up again;
+    // an account that can't be confirmed isn't guessed.
+    let acct
+    try {
+      const c = await getCreds()
+      const credKey = hashed("credentials", c.accessKeyId)
+      const known = await store.get(credKey)
+      acct = fresh(known?.at, ACCOUNT_TTL_MS) && known.account
+      acct ||= await once(credKey, async () => {
+        const id = await withCreds((cc) => account(cc, settings.region))
+        return (await store.update(credKey, () => ({ at: t, account: hashed("account", id) }))).account
+      })
+    } catch (error) {
+      return failed(error)
     }
-    const { entry, problems, signInError } = await job
-    const estimate = wantEstimate ? entry.estimate : undefined
-    const billed = wantBilled ? entry.billed : undefined
-    if (signInError && !estimate && !billed) {
-      return { error: signInError.message, windows: [], signIn: signInError instanceof SignInExpired ? "expired" : "kept" }
+
+    // One source: its stored reading if fresh, else a new one. Only the
+    // process holding the entry's claim asks AWS; the others wait for its
+    // answer, and try to claim it themselves only once it's let go, so a
+    // paid call is made once. It gives { data, problem, expired }, so every
+    // caller sharing it hears how it went.
+    const source = async (key, ttl, label, fetchData) => {
+      const take = (e) => (fresh(e?.at, ttl) ? e : undefined)
+      const deadline = Date.now() + CLAIM_WAIT_MS
+      let last
+      for (;;) {
+        const claimedAt = now().getTime()
+        const e = await store.update(key, (cur) => {
+          if (take(cur)) return cur
+          if (cur?.claimBy && cur.claimBy !== me && claimedAt - cur.claimAt < CLAIM_MS) return cur
+          return { ...cur, claimAt: claimedAt, claimBy: me }
+        })
+        last = e
+        if (take(e)) return { data: e.data }
+        if (e?.claimBy === me) break
+        if (Date.now() > deadline) return { data: e?.data, problem: `${label}: another magpie is still reading it` }
+        await wait(500)
+      }
+      try {
+        const data = await fetchData()
+        await store.update(key, () => ({ at: t, data }))
+        return { data }
+      } catch (error) {
+        await store.update(key, (e) => (e?.claimBy === me ? { ...e, claimBy: undefined, claimAt: undefined } : e))
+        // the last good reading, if any, with what went wrong
+        return { data: last?.data, problem: `${label}: ${error.message}`, expired: error instanceof SignInExpired }
+      }
     }
-    const windows = usageWindows({ now: at, budget, estimate, billed, enforce: options.enforce === true })
-    if (!windows.length && problems.length) return { error: problems.join("; "), windows: [], signIn: "kept" }
+
+    const estimateKey = hashed("estimate", acct, regions, start.toISOString())
+    const billedKey = hashed("billed", acct)
+    const [estimateRead, billedRead] = await Promise.all([
+      wantEstimate &&
+        once(estimateKey, () =>
+          source(estimateKey, budget.refreshMs, "token metrics", async () => {
+            const usage = {}
+            for (const region of regions) {
+              for (const [model, u] of Object.entries(await withCreds((c) => tokenUsage(c, region, { start, end: at, fetchImpl })))) {
+                const sum = (usage[model] ??= { all: {}, long: {} })
+                for (const part of ["all", "long"]) for (const [k, v] of Object.entries(u[part])) sum[part][k] = (sum[part][k] ?? 0) + v
+              }
+            }
+            const priced = priceUsage(usage, await metadata())
+            return { usd: priced.usd, unpriced: priced.unpriced }
+          }),
+        ),
+      wantBilled &&
+        once(billedKey, () =>
+          source(billedKey, BILLED_TTL_MS, "Cost Explorer", () => {
+            // Any week start lies in the past 7 days, so one reading serves
+            // every week setting.
+            const from = new Date(Math.min(monthStart(at).getTime(), Date.parse(ymd(new Date(t - 7 * DAY_MS)))))
+            return withCreds((c) => billedDays(c, { start: from, end: new Date(t + DAY_MS), fetchImpl }))
+          }),
+        ),
+    ])
+    for (const r of [estimateRead, billedRead]) {
+      if (r?.problem) problems.push(r.problem)
+      if (r?.expired) expired = true
+    }
+    const estimate = estimateRead?.data
+    const billed = billedRead?.data
+
+    const windows = usageWindows({ now: at, budget, estimate: estimate || undefined, billed: billed || undefined, enforce: options.enforce === true })
+    const notes = [...budget.problems, ...(options.notes ?? [])]
     if (problems.length) windows.push({ name: "Not read", display: problems.join("; "), aside: true })
     // A setting that can't be read is left at its default, and said so.
-    if (budget.problems.length) windows.push({ name: "Options", display: `not used: ${budget.problems.join("; ")}`, aside: true })
-    return { windows, signIn: signInError instanceof SignInExpired ? "expired" : "kept" }
+    if (notes.length) windows.push({ name: "Options", display: `not used: ${notes.join("; ")}`, aside: true })
+    const signIn = expired ? "expired" : "kept"
+    if (!estimate && !billed && problems.length) return { error: problems.join("; "), windows, signIn }
+    return { windows, signIn }
+
+    function failed(error) {
+      if (error instanceof SignInExpired) expired = true
+      return { error: error.message, windows: [{ name: "Not read", display: error.message, aside: true }], signIn: expired ? "expired" : "kept" }
+    }
   }
 }
 
@@ -270,15 +361,20 @@ async function server(input, pluginOptions) {
     }
   }
   // The usage settings, later ones winning: the account's sign-in answers,
-  // the plugin's JSON options (`magpie plugin options …`, for the rest),
-  // then the editor's switches.
+  // then the plugin's JSON options (`magpie plugin options …`) where they
+  // give a value (null leaves the account's own). What costs money or stops
+  // routing is only ever the editor's switches, never the JSON.
   const usageOptions = (auth) => {
     const json = pluginOptions && typeof pluginOptions === "object" && !Array.isArray(pluginOptions) ? pluginOptions : {}
-    // A blank JSON value (the Options example's null) leaves the account's own.
-    const set = Object.fromEntries(Object.entries(json).filter(([, v]) => v !== null && v !== undefined && v !== ""))
-    const out = { ...budgetFromAuth(auth), ...set }
-    if (on(SWITCHES.enforce)) out.enforce = true
-    if (on(SWITCHES.billed)) out.billed = true
+    const notes = []
+    const set = {}
+    for (const [k, v] of Object.entries(json)) {
+      if (v === null || v === undefined || v === "") continue
+      if (k in SWITCH_OPTIONS) notes.push(`${k} (turn on "${SWITCH_OPTIONS[k]}" in the provider's editor)`)
+      else set[k] = v
+    }
+    const out = { ...budgetFromAuth(auth), ...set, enforce: on(SWITCHES.enforce), billed: on(SWITCHES.billed) }
+    if (notes.length) out.notes = notes
     return out
   }
   // The sign-in offers profile sections from both AWS files.
@@ -290,7 +386,7 @@ async function server(input, pluginOptions) {
     ? { type: "select", key: "profile", message: "AWS profile (config or credentials file)", options: ordered.map((p) => ({ label: p, value: p })) }
     : { type: "text", key: "profile", message: "AWS profile (config or credentials file)", placeholder: "default", validate: (v) => (!v || PROFILE.test(v) ? undefined : "Not a profile name") }
 
-  return {
+  const hooks = {
     config: async (cfg) => {
       cfg.provider ??= {}
       const p = (cfg.provider[ID] ??= {})
@@ -424,6 +520,9 @@ async function server(input, pluginOptions) {
       },
     },
   }
+  // For tests: the settings a reading gets. Not enumerable, so not a hook.
+  Object.defineProperty(hooks, "_usageOptions", { value: usageOptions })
+  return hooks
 }
 
 export const _internal = { ID, server, spendReader, budgetFromAuth, SWITCHES }
